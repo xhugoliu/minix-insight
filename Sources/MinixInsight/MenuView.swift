@@ -22,7 +22,7 @@ struct MenuView: View {
             }
         }
         .padding(14)
-        .frame(width: 560)
+        .frame(width: 560, height: 350, alignment: .topLeading)
     }
 
     private var header: some View {

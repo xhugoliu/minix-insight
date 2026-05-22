@@ -4,8 +4,6 @@ import SwiftUI
 struct KeyboardLayoutView: View {
     @EnvironmentObject private var appState: AppState
 
-    private let columns = Array(repeating: GridItem(.fixed(48), spacing: 5), count: 5)
-
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
             half(title: "Left", rows: 0..<3)
@@ -18,18 +16,23 @@ struct KeyboardLayoutView: View {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            LazyVGrid(columns: columns, spacing: 5) {
+            VStack(spacing: 5) {
                 ForEach(Array(rows), id: \.self) { row in
-                    ForEach(0..<5, id: \.self) { col in
-                        KeyTileView(
-                            summary: summary(row: row, col: col),
-                            maxPressCount: maxPressCount,
-                            isActive: appState.activeKeys.contains(AppState.keyID(row: row, col: col))
-                        )
+                    HStack(spacing: 5) {
+                        ForEach(0..<5, id: \.self) { col in
+                            KeyTileView(
+                                summary: summary(row: row, col: col),
+                                maxPressCount: maxPressCount,
+                                isActive: appState.activeKeys.contains(AppState.keyID(row: row, col: col))
+                            )
+                        }
                     }
+                    .frame(width: 260, height: 44)
                 }
             }
+            .frame(width: 260, height: 142)
         }
+        .frame(width: 260, height: 166, alignment: .topLeading)
     }
 
     private var maxPressCount: Int {
