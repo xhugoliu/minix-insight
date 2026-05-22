@@ -22,7 +22,7 @@ struct MenuView: View {
             }
         }
         .padding(14)
-        .frame(width: 560, height: 350, alignment: .topLeading)
+        .frame(width: 560, height: 410, alignment: .topLeading)
     }
 
     private var header: some View {
@@ -64,24 +64,22 @@ struct MenuView: View {
     }
 
     private var actions: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                Button(appState.isLogging ? "Pause Logging" : "Resume Logging") {
-                    appState.toggleLogging()
-                }
-                Button("Export Today CSV") {
-                    appState.exportToday()
-                }
+        HStack(spacing: 8) {
+            Button(appState.isLogging ? "Pause Logging" : "Resume Logging") {
+                appState.toggleLogging()
             }
-            HStack(spacing: 8) {
-                Button("Reveal Database") {
-                    appState.revealDatabase()
-                }
-                Button("Quit") {
-                    appState.quit()
-                }
+            Button("Export Today CSV") {
+                appState.exportToday()
+            }
+            Button("Reveal Database") {
+                appState.revealDatabase()
+            }
+            Spacer()
+            Button("Quit") {
+                appState.quit()
             }
         }
+        .frame(height: 32)
     }
 
     private var statusText: String {
