@@ -10,6 +10,8 @@ struct MenuView: View {
             Divider()
             stats
             Divider()
+            KeyboardLayoutView()
+            Divider()
             actions
             if let error = appState.lastError {
                 Divider()
@@ -20,7 +22,7 @@ struct MenuView: View {
             }
         }
         .padding(14)
-        .frame(width: 280)
+        .frame(width: 560)
     }
 
     private var header: some View {
@@ -63,17 +65,21 @@ struct MenuView: View {
 
     private var actions: some View {
         VStack(spacing: 8) {
-            Button(appState.isLogging ? "Pause Logging" : "Resume Logging") {
-                appState.toggleLogging()
+            HStack(spacing: 8) {
+                Button(appState.isLogging ? "Pause Logging" : "Resume Logging") {
+                    appState.toggleLogging()
+                }
+                Button("Export Today CSV") {
+                    appState.exportToday()
+                }
             }
-            Button("Export Today CSV") {
-                appState.exportToday()
-            }
-            Button("Reveal Database") {
-                appState.revealDatabase()
-            }
-            Button("Quit") {
-                appState.quit()
+            HStack(spacing: 8) {
+                Button("Reveal Database") {
+                    appState.revealDatabase()
+                }
+                Button("Quit") {
+                    appState.quit()
+                }
             }
         }
     }
