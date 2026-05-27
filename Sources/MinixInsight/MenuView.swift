@@ -49,9 +49,19 @@ struct MenuView: View {
                 Text("\(appState.todayPresses) presses")
             }
             GridRow {
-                Text("Held")
+                Text("Today Held")
                     .foregroundStyle(.secondary)
                 Text(formatDuration(appState.todayHeldMs))
+            }
+            GridRow {
+                Text("7 Days")
+                    .foregroundStyle(.secondary)
+                Text("\(appState.last7DaysPresses) presses")
+            }
+            GridRow {
+                Text("7 Days Held")
+                    .foregroundStyle(.secondary)
+                Text(formatDuration(appState.last7DaysHeldMs))
             }
             GridRow {
                 Text("Last")
@@ -70,6 +80,9 @@ struct MenuView: View {
             }
             Button("Export Today CSV") {
                 appState.exportToday()
+            }
+            Button("Export 7-Day Summary") {
+                appState.exportSummary()
             }
             Button("Reveal Database") {
                 appState.revealDatabase()

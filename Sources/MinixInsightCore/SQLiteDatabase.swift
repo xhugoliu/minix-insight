@@ -21,8 +21,10 @@ public enum DatabaseError: Error, LocalizedError {
 public final class SQLiteDatabase: @unchecked Sendable {
     private var handle: OpaquePointer?
     private let queue = DispatchQueue(label: "minix-insight.sqlite")
+    private let layout: KeyboardLayout
 
-    public init(url: URL) throws {
+    public init(url: URL, layout: KeyboardLayout = .miniX) throws {
+        self.layout = layout
         try AppPaths.ensureDirectories()
         if sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) != SQLITE_OK {
             throw DatabaseError.openFailed(lastError)
@@ -79,55 +81,16 @@ public final class SQLiteDatabase: @unchecked Sendable {
     }
 
     public func heldMs(since start: Date) throws -> Int64 {
-        let events = try eventsSince(start)
-        var downAt: [String: UInt32] = [:]
-        var total: Int64 = 0
-
-        for event in events {
-            let key = "\(event.row),\(event.col)"
-            if event.pressed {
-                downAt[key] = event.qmkTimeMs
-            } else if let startedAt = downAt.removeValue(forKey: key) {
-                total += Int64(elapsedMs(from: startedAt, to: event.qmkTimeMs))
-            }
-        }
-
-        return total
+        try summarySnapshot(since: start).heldMs
     }
 
     public func summary(since start: Date) throws -> [KeySummary] {
+        try summarySnapshot(since: start).keySummaries
+    }
+
+    public func summarySnapshot(since start: Date) throws -> SummarySnapshot {
         let events = try eventsSince(start)
-        var pressCounts: [String: Int] = [:]
-        var heldTotals: [String: Int64] = [:]
-        var downAt: [String: UInt32] = [:]
-
-        for event in events {
-            let key = "\(event.row),\(event.col)"
-            if event.pressed {
-                if downAt[key] == nil {
-                    pressCounts[key, default: 0] += 1
-                    downAt[key] = event.qmkTimeMs
-                }
-            } else if let startedAt = downAt.removeValue(forKey: key) {
-                heldTotals[key, default: 0] += Int64(elapsedMs(from: startedAt, to: event.qmkTimeMs))
-            }
-        }
-
-        var result: [KeySummary] = []
-        for row in 0..<6 {
-            for col in 0..<5 {
-                let key = "\(row),\(col)"
-                result.append(
-                    KeySummary(
-                        row: row,
-                        col: col,
-                        pressCount: pressCounts[key, default: 0],
-                        heldMs: heldTotals[key, default: 0]
-                    )
-                )
-            }
-        }
-        return result
+        return SummaryCalculator.snapshot(from: events, layout: layout)
     }
 
     public func exportTodayCSV() throws -> URL {
@@ -152,6 +115,28 @@ public final class SQLiteDatabase: @unchecked Sendable {
                     event.pressed ? "1" : "0",
                     String(event.layer),
                     String(event.keycode),
+                ].joined(separator: ",")
+            )
+        }
+
+        try lines.joined(separator: "\n").write(to: output, atomically: true, encoding: .utf8)
+        return output
+    }
+
+    public func exportSummaryCSV(since start: Date) throws -> URL {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd-HHmmss"
+        let output = AppPaths.exportsDirectory.appendingPathComponent("minix-summary-\(dateFormatter.string(from: Date())).csv")
+        let snapshot = try summarySnapshot(since: start)
+
+        var lines = ["row,col,press_count,held_ms"]
+        for summary in snapshot.keySummaries {
+            lines.append(
+                [
+                    String(summary.row),
+                    String(summary.col),
+                    String(summary.pressCount),
+                    String(summary.heldMs),
                 ].joined(separator: ",")
             )
         }
@@ -247,13 +232,6 @@ public final class SQLiteDatabase: @unchecked Sendable {
         if sqlite3_step(statement) != SQLITE_DONE {
             throw DatabaseError.stepFailed(lastError)
         }
-    }
-
-    private func elapsedMs(from start: UInt32, to end: UInt32) -> UInt32 {
-        if end >= start {
-            return end - start
-        }
-        return (UInt32.max - start) + end + 1
     }
 
     private var lastError: String {
