@@ -34,6 +34,18 @@ public struct SummarySnapshot: Equatable, Sendable {
     }
 }
 
+public struct DailySummary: Equatable, Sendable {
+    public let dayStart: Date
+    public let pressCount: Int
+    public let heldMs: Int64
+
+    public init(dayStart: Date, pressCount: Int, heldMs: Int64) {
+        self.dayStart = dayStart
+        self.pressCount = pressCount
+        self.heldMs = heldMs
+    }
+}
+
 public struct LiveSummaryTracker: Sendable {
     public private(set) var snapshot: SummarySnapshot
     public private(set) var activeKeys: Set<String> = []

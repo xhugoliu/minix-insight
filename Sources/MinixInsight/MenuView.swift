@@ -10,6 +10,8 @@ struct MenuView: View {
             Divider()
             stats
             Divider()
+            trend
+            Divider()
             KeyboardLayoutView()
             Divider()
             actions
@@ -79,6 +81,25 @@ struct MenuView: View {
         .font(.system(.body, design: .rounded))
     }
 
+    private var trend: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("7-Day Trend")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(alignment: .bottom, spacing: 8) {
+                ForEach(appState.dailySummaries, id: \.dayStart) { summary in
+                    DailyTrendBar(
+                        label: weekdayLabel(for: summary.dayStart),
+                        value: summary.pressCount,
+                        maxValue: maxDailyPressCount,
+                        heldMs: summary.heldMs
+                    )
+                }
+            }
+            .frame(height: 92, alignment: .bottomLeading)
+        }
+    }
+
     private var actions: some View {
         HStack(spacing: 8) {
             Button(appState.isLogging ? "Pause Logging" : "Resume Logging") {
@@ -137,11 +158,65 @@ struct MenuView: View {
         return appState.statusDetail
     }
 
+    private var maxDailyPressCount: Int {
+        max(appState.dailySummaries.map(\.pressCount).max() ?? 0, 1)
+    }
+
+    private func weekdayLabel(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "E"
+        return formatter.string(from: date)
+    }
+
     private func formatDuration(_ milliseconds: Int64) -> String {
         let seconds = Double(milliseconds) / 1000
         if seconds < 60 {
             return String(format: "%.1fs", seconds)
         }
         return String(format: "%.1fmin", seconds / 60)
+    }
+}
+
+private struct DailyTrendBar: View {
+    let label: String
+    let value: Int
+    let maxValue: Int
+    let heldMs: Int64
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Text("\(value)")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+            RoundedRectangle(cornerRadius: 5)
+                .fill(barColor)
+                .frame(width: 22, height: barHeight)
+            Text(label)
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+            Text(heldText)
+                .font(.system(size: 8, weight: .regular, design: .rounded))
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+        }
+        .frame(width: 34, alignment: .bottom)
+    }
+
+    private var barHeight: CGFloat {
+        let ratio = Double(value) / Double(maxValue)
+        return max(12, 12 + ratio * 42)
+    }
+
+    private var barColor: Color {
+        value == 0 ? Color.secondary.opacity(0.15) : Color.accentColor.opacity(0.22 + min(Double(value) / Double(maxValue), 1) * 0.5)
+    }
+
+    private var heldText: String {
+        let seconds = Double(heldMs) / 1000
+        if seconds < 60 {
+            return String(format: "%.0fs", seconds)
+        }
+        return String(format: "%.1fm", seconds / 60)
     }
 }

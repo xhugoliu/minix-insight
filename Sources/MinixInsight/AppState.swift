@@ -14,6 +14,7 @@ final class AppState: ObservableObject {
     @Published var last7DaysPresses = 0
     @Published var todayHeldMs: Int64 = 0
     @Published var last7DaysHeldMs: Int64 = 0
+    @Published var dailySummaries: [DailySummary] = []
     @Published var lastEventText = "No events yet"
     @Published var appError: String?
     @Published var exportedURL: URL?
@@ -121,11 +122,16 @@ final class AppState: ObservableObject {
         do {
             let todaySnapshot = try database.summarySnapshot(since: todayStartDate)
             let last7DaysSnapshot = try database.summarySnapshot(since: summaryStartDate)
+            let dailySummaries = try database.dailySummaries(
+                since: summaryStartDate,
+                days: Self.summaryRangeDays
+            )
 
             summaryTracker.rebase(snapshot: todaySnapshot)
             syncPublishedSummary()
             last7DaysPresses = last7DaysSnapshot.pressCount
             last7DaysHeldMs = last7DaysSnapshot.heldMs
+            self.dailySummaries = dailySummaries
             appError = nil
         } catch {
             appError = error.localizedDescription

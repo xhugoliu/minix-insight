@@ -65,6 +65,29 @@ struct SQLiteDatabaseTests {
         #expect(content.contains("0,1,1,80"))
     }
 
+    @Test func buildsDailySummariesAcrossSevenDays() throws {
+        let database = try makeDatabase()
+        let calendar = Calendar(identifier: .gregorian)
+        let start = calendar.startOfDay(for: Date(timeIntervalSince1970: 1_700_000_000))
+
+        try database.insert(event(on: start, secondsIntoDay: 10, qmkTimeMs: 100, row: 0, col: 0, pressed: true))
+        try database.insert(event(on: start, secondsIntoDay: 20, qmkTimeMs: 160, row: 0, col: 0, pressed: false))
+
+        let day3 = try #require(calendar.date(byAdding: .day, value: 3, to: start))
+        try database.insert(event(on: day3, secondsIntoDay: 5, qmkTimeMs: 200, row: 1, col: 1, pressed: true))
+        try database.insert(event(on: day3, secondsIntoDay: 15, qmkTimeMs: 260, row: 1, col: 1, pressed: false))
+
+        let summaries = try database.dailySummaries(since: start, days: 7, calendar: calendar)
+
+        #expect(summaries.count == 7)
+        #expect(summaries[0].pressCount == 1)
+        #expect(summaries[0].heldMs == 60)
+        #expect(summaries[1].pressCount == 0)
+        #expect(summaries[3].pressCount == 1)
+        #expect(summaries[3].heldMs == 60)
+        #expect(summaries[6].pressCount == 0)
+    }
+
     private func makeDatabase() throws -> SQLiteDatabase {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -91,6 +114,28 @@ struct SQLiteDatabaseTests {
             pressed: pressed,
             layer: layer,
             keycode: keycode
+        )
+    }
+
+    private func event(
+        on dayStart: Date,
+        secondsIntoDay: TimeInterval,
+        qmkTimeMs: UInt32,
+        row: UInt8,
+        col: UInt8,
+        pressed: Bool
+    ) -> TelemetryEvent {
+        let hostTime = dayStart.addingTimeInterval(secondsIntoDay)
+        return TelemetryEvent(
+            hostTime: hostTime,
+            hostTimeNs: Int64(hostTime.timeIntervalSince1970 * 1_000_000_000),
+            qmkTimeMs: qmkTimeMs,
+            sequence: qmkTimeMs,
+            row: row,
+            col: col,
+            pressed: pressed,
+            layer: 0,
+            keycode: 0
         )
     }
 }

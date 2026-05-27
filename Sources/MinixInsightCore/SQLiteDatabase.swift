@@ -145,6 +145,21 @@ public final class SQLiteDatabase: @unchecked Sendable {
         return output
     }
 
+    public func dailySummaries(since start: Date, days: Int, calendar: Calendar = .current) throws -> [DailySummary] {
+        let events = try eventsSince(start)
+        let grouped = Dictionary(grouping: events) { event in
+            calendar.startOfDay(for: event.hostTime)
+        }
+
+        return (0..<days).compactMap { offset in
+            guard let day = calendar.date(byAdding: .day, value: offset, to: calendar.startOfDay(for: start)) else {
+                return nil
+            }
+            let summary = SummaryCalculator.snapshot(from: grouped[day] ?? [], layout: layout)
+            return DailySummary(dayStart: day, pressCount: summary.pressCount, heldMs: summary.heldMs)
+        }
+    }
+
     private func migrate() throws {
         try execute("""
         CREATE TABLE IF NOT EXISTS events (
