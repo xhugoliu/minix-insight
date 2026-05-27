@@ -13,12 +13,12 @@ struct MenuView: View {
             KeyboardLayoutView()
             Divider()
             actions
-            if let error = appState.lastError {
+            if let detail = footerMessage {
                 Divider()
-                Text(error)
+                Text(detail)
                     .font(.caption)
-                    .foregroundStyle(.red)
-                    .lineLimit(3)
+                    .foregroundStyle(appState.statusShowsIssue ? .orange : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(14)
@@ -28,7 +28,7 @@ struct MenuView: View {
     private var header: some View {
         HStack(spacing: 10) {
             Circle()
-                .fill(appState.status.isConnected && appState.isLogging ? Color.green : Color.orange)
+                .fill(statusColor)
                 .frame(width: 9, height: 9)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Minix Insight")
@@ -36,6 +36,12 @@ struct MenuView: View {
                 Text(statusText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if let detail = appState.statusDetail {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(appState.statusShowsIssue ? Color.orange : Color.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer()
         }
@@ -103,13 +109,32 @@ struct MenuView: View {
         switch appState.status {
         case .connected(let name):
             return name
-        case .waiting:
-            return "Waiting for keyboard"
+        case .waiting(let reason):
+            switch reason {
+            case .initial:
+                return "Waiting for keyboard"
+            case .disconnected:
+                return "Keyboard disconnected"
+            }
         case .stopped:
             return "Paused"
-        case .error(let message):
-            return message
+        case .issue(let issue):
+            return issue.title
         }
+    }
+
+    private var statusColor: Color {
+        if appState.statusShowsIssue {
+            return .orange
+        }
+        return appState.status.isConnected && appState.isLogging ? .green : .yellow
+    }
+
+    private var footerMessage: String? {
+        guard appState.statusShowsIssue else {
+            return nil
+        }
+        return appState.statusDetail
     }
 
     private func formatDuration(_ milliseconds: Int64) -> String {

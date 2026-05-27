@@ -6,15 +6,16 @@ import SwiftUI
 @MainActor
 final class AppState: ObservableObject {
     private static let layout: KeyboardLayout = .miniX
+    private static let summaryRangeDays = 7
 
-    @Published var status: CollectorStatus = .waiting
+    @Published var status: CollectorStatus = .waiting(.initial)
     @Published var isLogging = true
     @Published var todayPresses = 0
     @Published var last7DaysPresses = 0
     @Published var todayHeldMs: Int64 = 0
     @Published var last7DaysHeldMs: Int64 = 0
     @Published var lastEventText = "No events yet"
-    @Published var lastError: String?
+    @Published var appError: String?
     @Published var exportedURL: URL?
     @Published var keySummaries = SummarySnapshot.empty(layout: AppState.layout).keySummaries
     @Published var activeKeys: Set<String> = []
@@ -68,17 +69,17 @@ final class AppState: ObservableObject {
             exportedURL = url
             NSWorkspace.shared.activateFileViewerSelecting([url])
         } catch {
-            lastError = error.localizedDescription
+            appError = error.localizedDescription
         }
     }
 
     func exportSummary() {
         do {
-            let url = try database.exportSummaryCSV(since: Calendar.current.date(byAdding: .day, value: -6, to: Calendar.current.startOfDay(for: Date())) ?? Date())
+            let url = try database.exportSummaryCSV(since: summaryStartDate)
             exportedURL = url
             NSWorkspace.shared.activateFileViewerSelecting([url])
         } catch {
-            lastError = error.localizedDescription
+            appError = error.localizedDescription
         }
     }
 
@@ -104,30 +105,28 @@ final class AppState: ObservableObject {
 
     private func handle(_ event: TelemetryEvent) {
         do {
+            appError = nil
             try database.insert(event)
             lastEventText = "r\(event.row)c\(event.col) \(event.pressed ? "down" : "up")"
             summaryTracker.apply(event)
             syncPublishedSummary()
         } catch {
-            lastError = error.localizedDescription
+            appError = error.localizedDescription
         }
     }
 
     private func refreshStats() {
         do {
-            let calendar = Calendar.current
-            let todayStart = calendar.startOfDay(for: Date())
-            let last7DaysStart = calendar.date(byAdding: .day, value: -6, to: todayStart) ?? todayStart
-
-            let todaySnapshot = try database.summarySnapshot(since: todayStart)
-            let last7DaysSnapshot = try database.summarySnapshot(since: last7DaysStart)
+            let todaySnapshot = try database.summarySnapshot(since: todayStartDate)
+            let last7DaysSnapshot = try database.summarySnapshot(since: summaryStartDate)
 
             summaryTracker.rebase(snapshot: todaySnapshot)
             syncPublishedSummary()
             last7DaysPresses = last7DaysSnapshot.pressCount
             last7DaysHeldMs = last7DaysSnapshot.heldMs
+            appError = nil
         } catch {
-            lastError = error.localizedDescription
+            appError = error.localizedDescription
         }
     }
 
@@ -141,5 +140,21 @@ final class AppState: ObservableObject {
         todayPresses = snapshot.pressCount
         todayHeldMs = snapshot.heldMs
         activeKeys = summaryTracker.activeKeys
+    }
+
+    var statusDetail: String? {
+        appError ?? status.detail
+    }
+
+    var statusShowsIssue: Bool {
+        appError != nil || status.showsIssue
+    }
+
+    private var todayStartDate: Date {
+        Calendar.current.startOfDay(for: Date())
+    }
+
+    private var summaryStartDate: Date {
+        Calendar.current.date(byAdding: .day, value: -(Self.summaryRangeDays - 1), to: todayStartDate) ?? todayStartDate
     }
 }

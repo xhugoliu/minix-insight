@@ -1,27 +1,84 @@
 import Foundation
 @preconcurrency import IOKit.hid
 
+public enum CollectorWaitingReason: Equatable, Sendable {
+    case initial
+    case disconnected
+}
+
+public enum CollectorIssue: Equatable, Sendable {
+    case managerOpenFailed(code: Int32)
+    case deviceOpenFailed(code: Int32)
+    case unsupportedTelemetry(length: Int)
+
+    public var title: String {
+        switch self {
+        case .managerOpenFailed:
+            return "Raw HID unavailable"
+        case .deviceOpenFailed:
+            return "Raw HID busy"
+        case .unsupportedTelemetry:
+            return "Unsupported telemetry"
+        }
+    }
+
+    public var detail: String {
+        switch self {
+        case .managerOpenFailed(let code):
+            return "Could not start the macOS HID manager (\(codeLabel(code))). Replug miniX or restart the app."
+        case .deviceOpenFailed(let code):
+            return "Could not open the keyboard Raw HID interface (\(codeLabel(code))). Close Vial or any WebHID configurator tab that is using miniX, then reconnect."
+        case .unsupportedTelemetry(let length):
+            return "Received an unsupported \(length)-byte telemetry report. Update the miniX firmware or this app so both sides use the same protocol."
+        }
+    }
+}
+
 public enum CollectorStatus: Equatable, Sendable {
     case stopped
-    case waiting
+    case waiting(CollectorWaitingReason)
     case connected(String)
-    case error(String)
+    case issue(CollectorIssue)
 
     public var title: String {
         switch self {
         case .stopped:
             return "Paused"
-        case .waiting:
-            return "Waiting"
-        case .connected:
-            return "Connected"
-        case .error:
-            return "Error"
+        case .waiting(.initial):
+            return "Waiting for keyboard"
+        case .waiting(.disconnected):
+            return "Keyboard disconnected"
+        case .connected(let name):
+            return name
+        case .issue(let issue):
+            return issue.title
         }
     }
 
     public var isConnected: Bool {
         if case .connected = self {
+            return true
+        }
+        return false
+    }
+
+    public var detail: String? {
+        switch self {
+        case .stopped:
+            return "Logging is paused. Resume to listen for miniX key events."
+        case .waiting(.initial):
+            return "Connect miniX. If it does not appear, close Vial or any WebHID keyboard tab first."
+        case .waiting(.disconnected):
+            return "Reconnect miniX to resume logging."
+        case .connected:
+            return "Recording physical key telemetry locally without accessibility permissions."
+        case .issue(let issue):
+            return issue.detail
+        }
+    }
+
+    public var showsIssue: Bool {
+        if case .issue = self {
             return true
         }
         return false
@@ -36,6 +93,7 @@ public final class TelemetryCollector: @unchecked Sendable {
     private var manager: IOHIDManager?
     private var devices: Set<IOHIDDevice> = []
     private var buffers: [IOHIDDevice: UnsafeMutablePointer<UInt8>] = [:]
+    private var currentStatus: CollectorStatus = .stopped
     private var running = false
 
     public init(onEvent: @escaping @Sendable (TelemetryEvent) -> Void, onStatus: @escaping @Sendable (CollectorStatus) -> Void) {
@@ -80,11 +138,11 @@ public final class TelemetryCollector: @unchecked Sendable {
 
         let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         if result != kIOReturnSuccess {
-            emitStatus(.error("Cannot open Raw HID manager"))
+            emitStatus(.issue(.managerOpenFailed(code: Int32(result))))
             return
         }
 
-        emitStatus(.waiting)
+        emitStatus(.waiting(.initial))
     }
 
     private func teardownManager() {
@@ -108,7 +166,7 @@ public final class TelemetryCollector: @unchecked Sendable {
 
             let result = IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone))
             guard result == kIOReturnSuccess else {
-                self.emitStatus(.error("Cannot open keyboard Raw HID interface"))
+                self.emitStatus(.issue(.deviceOpenFailed(code: Int32(result))))
                 return
             }
 
@@ -135,16 +193,25 @@ public final class TelemetryCollector: @unchecked Sendable {
         queue.async {
             self.unregister(device)
             self.devices.remove(device)
-            self.emitStatus(self.devices.isEmpty ? .waiting : .connected("miniX"))
+            self.emitStatus(self.devices.isEmpty ? .waiting(.disconnected) : .connected(self.connectedDeviceName()))
         }
     }
 
     fileprivate func inputReport(device: IOHIDDevice, report: UnsafeMutablePointer<UInt8>, length: CFIndex) {
         let bytes = Array(UnsafeBufferPointer(start: report, count: length))
-        guard let event = TelemetryPacket.parse(bytes) else {
-            return
+        queue.async {
+            guard self.running else { return }
+            guard let event = TelemetryPacket.parse(bytes) else {
+                self.emitStatus(.issue(.unsupportedTelemetry(length: length)))
+                return
+            }
+
+            if !self.currentStatus.isConnected {
+                self.emitStatus(.connected(self.deviceName(device)))
+            }
+
+            self.onEvent(event)
         }
-        onEvent(event)
     }
 
     private func unregister(_ device: IOHIDDevice) {
@@ -163,12 +230,26 @@ public final class TelemetryCollector: @unchecked Sendable {
         return "miniX"
     }
 
+    private func connectedDeviceName() -> String {
+        guard let device = devices.first else {
+            return "miniX"
+        }
+        return deviceName(device)
+    }
+
     private func emitStatus(_ status: CollectorStatus) {
+        guard status != currentStatus else { return }
+        currentStatus = status
         let onStatus = onStatus
         DispatchQueue.main.async {
             onStatus(status)
         }
     }
+}
+
+private func codeLabel(_ code: Int32) -> String {
+    let bits = UInt32(bitPattern: code)
+    return String(format: "0x%08x", bits)
 }
 
 private func deviceMatchedCallback(
