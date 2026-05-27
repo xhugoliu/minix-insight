@@ -46,6 +46,18 @@ public struct DailySummary: Equatable, Sendable {
     }
 }
 
+public struct DashboardSnapshot: Equatable, Sendable {
+    public let today: SummarySnapshot
+    public let range: SummarySnapshot
+    public let dailySummaries: [DailySummary]
+
+    public init(today: SummarySnapshot, range: SummarySnapshot, dailySummaries: [DailySummary]) {
+        self.today = today
+        self.range = range
+        self.dailySummaries = dailySummaries
+    }
+}
+
 public struct LiveSummaryTracker: Sendable {
     public private(set) var snapshot: SummarySnapshot
     public private(set) var activeKeys: Set<String> = []

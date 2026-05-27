@@ -160,6 +160,33 @@ public final class SQLiteDatabase: @unchecked Sendable {
         }
     }
 
+    public func dashboardSnapshot(
+        since start: Date,
+        todayStart: Date,
+        days: Int,
+        calendar: Calendar = .current
+    ) throws -> DashboardSnapshot {
+        let events = try eventsSince(start)
+        let range = SummaryCalculator.snapshot(from: events, layout: layout)
+
+        let todayStartNs = Int64(todayStart.timeIntervalSince1970 * 1_000_000_000)
+        let todayEvents = events.filter { $0.hostTimeNs >= todayStartNs }
+        let today = SummaryCalculator.snapshot(from: todayEvents, layout: layout)
+
+        let grouped = Dictionary(grouping: events) { event in
+            calendar.startOfDay(for: Date(timeIntervalSince1970: TimeInterval(event.hostTimeNs) / 1_000_000_000))
+        }
+        let dailySummaries: [DailySummary] = (0..<days).compactMap { offset in
+            guard let day = calendar.date(byAdding: .day, value: offset, to: calendar.startOfDay(for: start)) else {
+                return nil
+            }
+            let summary = SummaryCalculator.snapshot(from: grouped[day] ?? [], layout: layout)
+            return DailySummary(dayStart: day, pressCount: summary.pressCount, heldMs: summary.heldMs)
+        }
+
+        return DashboardSnapshot(today: today, range: range, dailySummaries: dailySummaries)
+    }
+
     private func migrate() throws {
         try execute("""
         CREATE TABLE IF NOT EXISTS events (
