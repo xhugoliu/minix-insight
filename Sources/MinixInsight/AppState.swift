@@ -5,7 +5,7 @@ import SwiftUI
 
 @MainActor
 final class AppState: ObservableObject {
-    private static let layout: KeyboardLayout = .miniX
+    private static let configuration = AppConfiguration.miniX
     private static let summaryRangeDays = 7
 
     @Published var status: CollectorStatus = .waiting(.initial)
@@ -17,24 +17,26 @@ final class AppState: ObservableObject {
     @Published var lastEventText = "No events yet"
     @Published var appError: String?
     @Published var exportedURL: URL?
-    @Published var keySummaries = SummarySnapshot.empty(layout: AppState.layout).keySummaries
+    @Published var keySummaries = SummarySnapshot.empty(layout: AppState.configuration.layout).keySummaries
     @Published var activeKeys: Set<String> = []
 
     let databaseURL = AppPaths.databaseURL
+    let configuration = AppState.configuration
 
     private let database: SQLiteDatabase
     private var collector: TelemetryCollector?
     private var refreshTimer: Timer?
-    private var summaryTracker = LiveSummaryTracker(layout: AppState.layout)
+    private var summaryTracker = LiveSummaryTracker(layout: AppState.configuration.layout)
 
     init() {
         do {
-            database = try SQLiteDatabase(url: AppPaths.databaseURL, layout: Self.layout)
+            database = try SQLiteDatabase(url: AppPaths.databaseURL, layout: Self.configuration.layout)
         } catch {
             fatalError("Failed to open database: \(error.localizedDescription)")
         }
 
         collector = TelemetryCollector(
+            configuration: Self.configuration,
             onEvent: { [weak self] event in
                 Task { @MainActor in
                     self?.handle(event)

@@ -87,6 +87,7 @@ public enum CollectorStatus: Equatable, Sendable {
 
 public final class TelemetryCollector: @unchecked Sendable {
     private let queue = DispatchQueue(label: "minix-insight.hid")
+    private let configuration: AppConfiguration
     private let onEvent: @Sendable (TelemetryEvent) -> Void
     private let onStatus: @Sendable (CollectorStatus) -> Void
 
@@ -96,7 +97,12 @@ public final class TelemetryCollector: @unchecked Sendable {
     private var currentStatus: CollectorStatus = .stopped
     private var running = false
 
-    public init(onEvent: @escaping @Sendable (TelemetryEvent) -> Void, onStatus: @escaping @Sendable (CollectorStatus) -> Void) {
+    public init(
+        configuration: AppConfiguration = .miniX,
+        onEvent: @escaping @Sendable (TelemetryEvent) -> Void,
+        onStatus: @escaping @Sendable (CollectorStatus) -> Void
+    ) {
+        self.configuration = configuration
         self.onEvent = onEvent
         self.onStatus = onStatus
     }
@@ -121,14 +127,7 @@ public final class TelemetryCollector: @unchecked Sendable {
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         self.manager = manager
 
-        let matches: [[String: Any]] = [
-            [
-                kIOHIDVendorIDKey as String: 0x5262,
-                kIOHIDProductIDKey as String: 0x4E4B,
-                kIOHIDDeviceUsagePageKey as String: 0xFF60,
-                kIOHIDDeviceUsageKey as String: 0x61,
-            ]
-        ]
+        let matches: [[String: Any]] = [configuration.deviceMatch.hidDictionary]
         IOHIDManagerSetDeviceMatchingMultiple(manager, matches as CFArray)
 
         let context = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
@@ -227,12 +226,12 @@ public final class TelemetryCollector: @unchecked Sendable {
         if let product = IOHIDDeviceGetProperty(device, kIOHIDProductKey as CFString) as? String {
             return product
         }
-        return "miniX"
+        return configuration.deviceName
     }
 
     private func connectedDeviceName() -> String {
         guard let device = devices.first else {
-            return "miniX"
+            return configuration.deviceName
         }
         return deviceName(device)
     }

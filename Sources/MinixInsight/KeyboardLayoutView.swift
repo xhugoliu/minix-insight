@@ -6,8 +6,8 @@ struct KeyboardLayoutView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
-            half(title: "Left", rows: 0..<3)
-            half(title: "Right", rows: 3..<6)
+            half(title: "Left", rows: appState.configuration.presentation.leftRows)
+            half(title: "Right", rows: appState.configuration.presentation.rightRows)
         }
     }
 
@@ -19,7 +19,7 @@ struct KeyboardLayoutView: View {
             VStack(spacing: 5) {
                 ForEach(Array(rows), id: \.self) { row in
                     HStack(spacing: 5) {
-                        ForEach(0..<5, id: \.self) { col in
+                        ForEach(0..<appState.configuration.layout.columns, id: \.self) { col in
                             KeyTileView(
                                 summary: summary(row: row, col: col),
                                 maxPressCount: maxPressCount,
