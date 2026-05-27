@@ -15,10 +15,14 @@
 - 菜单栏常驻状态图标
 - 自动识别 `5262:4e4b` Raw HID 设备
 - 物理按键事件写入本地 SQLite
-- 菜单内显示今日统计
-- `3x5 + 3x5` 正交分体键位统计视图
+- 菜单内显示 `Today / 7 Days` 核心统计摘要
+- 7 日按键趋势图
+- Top keys 排行与左右手负载概览
+- `3x5 + 3x5` 正交分体键位热力图
 - 支持暂停/继续记录
-- 支持导出当天 CSV
+- 支持导出当天原始事件 CSV
+- 支持导出 7 日统计摘要 CSV
+- 设备断开、接口占用、协议不匹配等状态提示
 
 ## 界面截图
 
@@ -26,7 +30,14 @@
 
 ![Minix Insight 菜单栏界面](./docs/screenshots/menu-overview.png)
 
-后续还可以继续补充键位热区、导出结果、历史统计等截图。
+当前界面采用仪表盘式分区布局：
+
+- Header：展示设备连接状态、键盘名称和记录状态
+- Summary cards：展示今日与最近 7 天的 presses / held 时长
+- 7-day trend：按天展示最近一周按键量与累计按住时长
+- Top keys / Hand load：展示高频键位和左右手使用分布
+- Keyboard heatmap：展示 `3x5 + 3x5` 分体键位的物理热度
+- Actions：提供暂停记录、导出和定位数据库等操作
 
 ## 构建与运行
 
@@ -43,6 +54,8 @@ open dist/Minix\ Insight.app
 ```
 
 记录期间请关闭 Vial 或 WebHID 页面，它们会占用同一个 Raw HID 接口。
+
+当前菜单使用自管的状态栏按钮 + popover 展开，而不是系统默认的 `MenuBarExtra(.window)` 窗口样式，因此展开定位和面板布局可控性更高。
 
 ## 固件协议
 

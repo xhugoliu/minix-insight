@@ -5,16 +5,33 @@ struct KeyboardLayoutView: View {
     @EnvironmentObject private var appState: AppState
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            half(title: "Left", rows: appState.configuration.presentation.leftRows)
-            half(title: "Right", rows: appState.configuration.presentation.rightRows)
+        GeometryReader { proxy in
+            let availableWidth = max(proxy.size.width, 320)
+            let columns = appState.configuration.layout.columns
+            let halfSpacing: CGFloat = 14
+            let tileSpacing: CGFloat = 5
+            let halfWidth = max(140, (availableWidth - halfSpacing) / 2)
+            let tileWidth = max(24, min(48, (halfWidth - tileSpacing * CGFloat(columns - 1)) / CGFloat(columns)))
+            let tileHeight = max(34, min(44, tileWidth * 0.92))
+
+            HStack(alignment: .top, spacing: halfSpacing) {
+                half(title: "Left", rows: appState.configuration.presentation.leftRows, tileWidth: tileWidth, tileHeight: tileHeight)
+                half(title: "Right", rows: appState.configuration.presentation.rightRows, tileWidth: tileWidth, tileHeight: tileHeight)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .frame(height: 156)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
+        )
     }
 
-    private func half(title: String, rows: Range<Int>) -> some View {
+    private func half(title: String, rows: Range<Int>, tileWidth: CGFloat, tileHeight: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.caption)
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             VStack(spacing: 5) {
                 ForEach(Array(rows), id: \.self) { row in
@@ -23,16 +40,16 @@ struct KeyboardLayoutView: View {
                             KeyTileView(
                                 summary: summary(row: row, col: col),
                                 maxPressCount: maxPressCount,
-                                isActive: appState.activeKeys.contains(AppState.keyID(row: row, col: col))
+                                isActive: appState.activeKeys.contains(AppState.keyID(row: row, col: col)),
+                                tileWidth: tileWidth,
+                                tileHeight: tileHeight
                             )
                         }
                     }
-                    .frame(width: 260, height: 44)
                 }
             }
-            .frame(width: 260, height: 142)
         }
-        .frame(width: 260, height: 166, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var maxPressCount: Int {
@@ -49,23 +66,25 @@ private struct KeyTileView: View {
     let summary: KeySummary
     let maxPressCount: Int
     let isActive: Bool
+    let tileWidth: CGFloat
+    let tileHeight: CGFloat
 
     var body: some View {
         VStack(spacing: 2) {
             Text("r\(summary.row)c\(summary.col)")
-                .font(.system(size: 8, weight: .medium, design: .rounded))
+                .font(.system(size: max(7, tileWidth * 0.16), weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
             Text("\(summary.pressCount)")
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .font(.system(size: max(11, tileWidth * 0.28), weight: .semibold, design: .rounded))
                 .monospacedDigit()
             Text(formatDuration(summary.heldMs))
-                .font(.system(size: 8, weight: .regular, design: .rounded))
+                .font(.system(size: max(7, tileWidth * 0.16), weight: .regular, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .minimumScaleFactor(0.7)
                 .lineLimit(1)
         }
-        .frame(width: 48, height: 44)
+        .frame(width: tileWidth, height: tileHeight)
         .background(tileBackground)
         .overlay(
             RoundedRectangle(cornerRadius: 7)
