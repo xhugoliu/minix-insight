@@ -112,7 +112,11 @@ public struct LiveSummaryTracker: Sendable {
             return
         }
 
-        let heldMs = Int64(qmkElapsedMs(from: startedAt, to: event.qmkTimeMs))
+        guard let elapsedMs = qmkElapsedMs(from: startedAt, to: event.qmkTimeMs) else {
+            return
+        }
+
+        let heldMs = Int64(elapsedMs)
         snapshot.heldMs += heldMs
         updateKey(row: row, col: col) { summary in
             KeySummary(
@@ -137,6 +141,58 @@ public struct LiveSummaryTracker: Sendable {
     }
 }
 
+public struct DayScopedLiveSummaryTracker: Sendable {
+    public private(set) var dayStart: Date
+
+    private var tracker: LiveSummaryTracker
+    private let calendar: Calendar
+
+    public init(
+        layout: KeyboardLayout,
+        dayStart: Date,
+        calendar: Calendar = .current,
+        snapshot: SummarySnapshot? = nil
+    ) {
+        self.calendar = calendar
+        self.dayStart = calendar.startOfDay(for: dayStart)
+        tracker = LiveSummaryTracker(layout: layout, snapshot: snapshot)
+    }
+
+    public var snapshot: SummarySnapshot {
+        tracker.snapshot
+    }
+
+    public var activeKeys: Set<String> {
+        tracker.activeKeys
+    }
+
+    public mutating func rebase(dayStart: Date, snapshot: SummarySnapshot) {
+        reset(dayStart: dayStart, snapshot: snapshot)
+    }
+
+    public mutating func reset(dayStart: Date, snapshot: SummarySnapshot? = nil) {
+        self.dayStart = calendar.startOfDay(for: dayStart)
+        tracker.reset(snapshot: snapshot)
+    }
+
+    @discardableResult
+    public mutating func apply(_ event: TelemetryEvent) -> Bool {
+        let eventDayStart = calendar.startOfDay(for: event.hostTime)
+        if eventDayStart < dayStart {
+            return false
+        }
+
+        var didRollDay = false
+        if eventDayStart > dayStart {
+            reset(dayStart: eventDayStart)
+            didRollDay = true
+        }
+
+        tracker.apply(event)
+        return didRollDay
+    }
+}
+
 public enum SummaryCalculator {
     public static func snapshot(from events: [TelemetryEvent], layout: KeyboardLayout) -> SummarySnapshot {
         var tracker = LiveSummaryTracker(layout: layout)
@@ -147,9 +203,21 @@ public enum SummaryCalculator {
     }
 }
 
-func qmkElapsedMs(from start: UInt32, to end: UInt32) -> UInt32 {
+func qmkElapsedMs(from start: UInt32, to end: UInt32) -> UInt32? {
+    let elapsed: UInt32
     if end >= start {
-        return end - start
+        elapsed = end - start
+    } else {
+        elapsed = (UInt32.max - start) + end + 1
     }
-    return (UInt32.max - start) + end + 1
+
+    // Very large single-key holds usually mean the keyboard rebooted and its
+    // QMK timer restarted, not that a key was physically held for hours.
+    guard elapsed <= maximumCredibleKeyHoldMs else {
+        return nil
+    }
+
+    return elapsed
 }
+
+private let maximumCredibleKeyHoldMs: UInt32 = 12 * 60 * 60 * 1_000

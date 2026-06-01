@@ -39,10 +39,68 @@ struct TelemetrySummaryTests {
         #expect(key24?.heldMs == 60)
     }
 
+    @Test func dayScopedTrackerRollsToNewDay() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let day1 = calendar.startOfDay(for: Date(timeIntervalSince1970: 1_700_000_000))
+        let day2 = try #require(calendar.date(byAdding: .day, value: 1, to: day1))
+        var tracker = DayScopedLiveSummaryTracker(layout: .miniX, dayStart: day1, calendar: calendar)
+
+        tracker.apply(event(on: day1, secondsIntoDay: 10, qmkTimeMs: 100, row: 0, col: 0, pressed: true))
+        tracker.apply(event(on: day1, secondsIntoDay: 11, qmkTimeMs: 160, row: 0, col: 0, pressed: false))
+        #expect(tracker.snapshot.pressCount == 1)
+        #expect(tracker.snapshot.heldMs == 60)
+
+        let didRollDay = tracker.apply(event(on: day2, secondsIntoDay: 1, qmkTimeMs: 200, row: 1, col: 1, pressed: true))
+        tracker.apply(event(on: day2, secondsIntoDay: 2, qmkTimeMs: 260, row: 1, col: 1, pressed: false))
+
+        #expect(didRollDay)
+        #expect(tracker.dayStart == day2)
+        #expect(tracker.snapshot.pressCount == 1)
+        #expect(tracker.snapshot.heldMs == 60)
+        #expect(tracker.snapshot.keySummaries.first { $0.row == 0 && $0.col == 0 }?.pressCount == 0)
+        #expect(tracker.snapshot.keySummaries.first { $0.row == 1 && $0.col == 1 }?.pressCount == 1)
+    }
+
+    @Test func ignoresImplausibleHoldAfterDeviceTimerRestart() {
+        let snapshot = SummaryCalculator.snapshot(
+            from: [
+                event(qmkTimeMs: 60_000, row: 2, col: 2, pressed: true),
+                event(qmkTimeMs: 10_000, row: 2, col: 2, pressed: false),
+            ],
+            layout: .miniX
+        )
+
+        #expect(snapshot.pressCount == 1)
+        #expect(snapshot.heldMs == 0)
+        #expect(snapshot.keySummaries.first { $0.row == 2 && $0.col == 2 }?.heldMs == 0)
+    }
+
     private func event(qmkTimeMs: UInt32, row: UInt8, col: UInt8, pressed: Bool) -> TelemetryEvent {
         TelemetryEvent(
             hostTime: Date(timeIntervalSince1970: 0),
             hostTimeNs: Int64(qmkTimeMs) * 1_000_000,
+            qmkTimeMs: qmkTimeMs,
+            sequence: qmkTimeMs,
+            row: row,
+            col: col,
+            pressed: pressed,
+            layer: 0,
+            keycode: 0
+        )
+    }
+
+    private func event(
+        on dayStart: Date,
+        secondsIntoDay: TimeInterval,
+        qmkTimeMs: UInt32,
+        row: UInt8,
+        col: UInt8,
+        pressed: Bool
+    ) -> TelemetryEvent {
+        let hostTime = dayStart.addingTimeInterval(secondsIntoDay)
+        return TelemetryEvent(
+            hostTime: hostTime,
+            hostTimeNs: Int64(hostTime.timeIntervalSince1970 * 1_000_000_000),
             qmkTimeMs: qmkTimeMs,
             sequence: qmkTimeMs,
             row: row,

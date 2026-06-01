@@ -30,7 +30,12 @@ final class AppState: ObservableObject {
     private var eventBatcher: TelemetryEventBatcher?
     private var refreshTimer: Timer?
     private var refreshTask: Task<Void, Never>?
-    private var summaryTracker = LiveSummaryTracker(layout: AppState.configuration.layout)
+    private var isRefreshingStats = false
+    private var needsStatsRefresh = false
+    private var summaryTracker = DayScopedLiveSummaryTracker(
+        layout: AppState.configuration.layout,
+        dayStart: Calendar.current.startOfDay(for: Date())
+    )
     private var bootstrapEvents: [TelemetryEvent] = []
     private var didLoadInitialSnapshot = false
 
@@ -112,7 +117,7 @@ final class AppState: ObservableObject {
 
     private func stop() {
         collector?.stop()
-        summaryTracker.reset(snapshot: summaryTracker.snapshot)
+        summaryTracker.reset(dayStart: todayStartDate, snapshot: summaryTracker.snapshot)
         syncPublishedSummary()
     }
 
@@ -125,14 +130,23 @@ final class AppState: ObservableObject {
         }
         persist(events)
         lastEventText = "r\(lastEvent.row)c\(lastEvent.col) \(lastEvent.pressed ? "down" : "up")"
+        var didRollDay = false
         for event in events {
-            summaryTracker.apply(event)
+            didRollDay = summaryTracker.apply(event) || didRollDay
         }
         syncPublishedSummary()
+        if didRollDay {
+            refreshStats()
+        }
     }
 
     private func refreshStats() {
-        refreshTask?.cancel()
+        guard !isRefreshingStats else {
+            needsStatsRefresh = true
+            return
+        }
+
+        isRefreshingStats = true
 
         let database = self.database
         let todayStartDate = self.todayStartDate
@@ -140,26 +154,19 @@ final class AppState: ObservableObject {
         let days = Self.summaryRangeDays
 
         refreshTask = Task.detached(priority: .utility) { [weak self] in
+            let result: Result<DashboardSnapshot, Error>
             do {
-                let dashboard = try database.dashboardSnapshot(
+                result = .success(try database.dashboardSnapshot(
                     since: summaryStartDate,
                     todayStart: todayStartDate,
                     days: days
-                )
-
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    self?.applyRefreshedStats(
-                        todaySnapshot: dashboard.today,
-                        last7DaysSnapshot: dashboard.range,
-                        dailySummaries: dashboard.dailySummaries
-                    )
-                }
+                ))
             } catch {
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    self?.appError = error.localizedDescription
-                }
+                result = .failure(error)
+            }
+
+            await MainActor.run {
+                self?.finishRefreshStats(result, todayStart: todayStartDate)
             }
         }
     }
@@ -177,12 +184,18 @@ final class AppState: ObservableObject {
     }
 
     private func applyRefreshedStats(
+        todayStart: Date,
         todaySnapshot: SummarySnapshot,
         last7DaysSnapshot: SummarySnapshot,
         dailySummaries: [DailySummary]
     ) {
+        let refreshedDayStart = Calendar.current.startOfDay(for: todayStart)
         if !didLoadInitialSnapshot {
-            var tracker = LiveSummaryTracker(layout: configuration.layout, snapshot: todaySnapshot)
+            var tracker = DayScopedLiveSummaryTracker(
+                layout: configuration.layout,
+                dayStart: refreshedDayStart,
+                snapshot: todaySnapshot
+            )
             for event in bootstrapEvents {
                 tracker.apply(event)
             }
@@ -190,12 +203,37 @@ final class AppState: ObservableObject {
             summaryTracker = tracker
             didLoadInitialSnapshot = true
             syncPublishedSummary()
+        } else if refreshedDayStart > summaryTracker.dayStart {
+            summaryTracker.rebase(dayStart: refreshedDayStart, snapshot: todaySnapshot)
+            syncPublishedSummary()
         }
 
         last7DaysPresses = last7DaysSnapshot.pressCount
         last7DaysHeldMs = last7DaysSnapshot.heldMs
         self.dailySummaries = dailySummaries
         appError = nil
+    }
+
+    private func finishRefreshStats(_ result: Result<DashboardSnapshot, Error>, todayStart: Date) {
+        refreshTask = nil
+        isRefreshingStats = false
+
+        switch result {
+        case .success(let dashboard):
+            applyRefreshedStats(
+                todayStart: todayStart,
+                todaySnapshot: dashboard.today,
+                last7DaysSnapshot: dashboard.range,
+                dailySummaries: dashboard.dailySummaries
+            )
+        case .failure(let error):
+            appError = error.localizedDescription
+        }
+
+        if needsStatsRefresh {
+            needsStatsRefresh = false
+            refreshStats()
+        }
     }
 
     private func persist(_ events: [TelemetryEvent]) {
