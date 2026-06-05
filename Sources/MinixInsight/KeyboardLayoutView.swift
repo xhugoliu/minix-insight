@@ -3,6 +3,7 @@ import SwiftUI
 
 struct KeyboardLayoutView: View {
     @EnvironmentObject private var appState: AppState
+    let metricMode: PanelMetricMode
 
     var body: some View {
         GeometryReader { proxy in
@@ -40,7 +41,9 @@ struct KeyboardLayoutView: View {
                             KeyTileView(
                                 summary: summary(row: row, col: col),
                                 maxPressCount: maxPressCount,
+                                maxHeldMs: maxHeldMs,
                                 isActive: appState.activeKeys.contains(AppState.keyID(row: row, col: col)),
+                                metricMode: metricMode,
                                 tileWidth: tileWidth,
                                 tileHeight: tileHeight
                             )
@@ -56,6 +59,10 @@ struct KeyboardLayoutView: View {
         max(appState.keySummaries.map(\.pressCount).max() ?? 0, 1)
     }
 
+    private var maxHeldMs: Int64 {
+        max(appState.keySummaries.map(\.heldMs).max() ?? 0, 1)
+    }
+
     private func summary(row: Int, col: Int) -> KeySummary {
         appState.keySummaries.first { $0.row == row && $0.col == col }
             ?? KeySummary(row: row, col: col, pressCount: 0, heldMs: 0)
@@ -65,7 +72,9 @@ struct KeyboardLayoutView: View {
 private struct KeyTileView: View {
     let summary: KeySummary
     let maxPressCount: Int
+    let maxHeldMs: Int64
     let isActive: Bool
+    let metricMode: PanelMetricMode
     let tileWidth: CGFloat
     let tileHeight: CGFloat
 
@@ -74,15 +83,28 @@ private struct KeyTileView: View {
             Text("r\(summary.row)c\(summary.col)")
                 .font(.system(size: max(7, tileWidth * 0.16), weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
-            Text("\(summary.pressCount)")
-                .font(.system(size: max(11, tileWidth * 0.28), weight: .semibold, design: .rounded))
-                .monospacedDigit()
-            Text(formatDuration(summary.heldMs))
-                .font(.system(size: max(7, tileWidth * 0.16), weight: .regular, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .minimumScaleFactor(0.7)
-                .lineLimit(1)
+            switch metricMode {
+            case .combined:
+                Text("\(summary.pressCount)")
+                    .font(.system(size: max(11, tileWidth * 0.28), weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                Text(formatDuration(summary.heldMs))
+                    .font(.system(size: max(7, tileWidth * 0.16), weight: .regular, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
+            case .press:
+                Text("\(summary.pressCount)")
+                    .font(.system(size: max(11, tileWidth * 0.28), weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+            case .held:
+                Text(formatDuration(summary.heldMs))
+                    .font(.system(size: max(11, tileWidth * 0.26), weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
+            }
         }
         .frame(width: tileWidth, height: tileHeight)
         .background(tileBackground)
@@ -94,9 +116,23 @@ private struct KeyTileView: View {
     }
 
     private var tileBackground: some ShapeStyle {
-        let intensity = Double(summary.pressCount) / Double(maxPressCount)
+        let intensity = heatmapIntensity
         let opacity = 0.08 + intensity * 0.32
         return isActive ? Color.green.opacity(0.22) : Color.accentColor.opacity(opacity)
+    }
+
+    private var heatmapIntensity: Double {
+        let pressIntensity = Double(summary.pressCount) / Double(maxPressCount)
+        let heldIntensity = Double(summary.heldMs) / Double(maxHeldMs)
+
+        switch metricMode {
+        case .combined:
+            return pressIntensity * 0.7 + heldIntensity * 0.3
+        case .press:
+            return pressIntensity
+        case .held:
+            return heldIntensity
+        }
     }
 
     private func formatDuration(_ milliseconds: Int64) -> String {

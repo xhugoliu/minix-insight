@@ -3,6 +3,7 @@ import SwiftUI
 
 struct MenuView: View {
     @EnvironmentObject private var appState: AppState
+    @State private var metricMode: PanelMetricMode = .combined
     @State private var topKeysCardHeight: CGFloat = 0
     @State private var handLoadCardHeight: CGFloat = 0
 
@@ -12,7 +13,7 @@ struct MenuView: View {
             summaryCards
             trend
             insights
-            KeyboardLayoutView()
+            KeyboardLayoutView(metricMode: metricMode)
             actions
             if let detail = footerMessage {
                 Text(detail)
@@ -45,18 +46,46 @@ struct MenuView: View {
                 }
             }
             Spacer()
-            statusBadge
+            VStack(alignment: .trailing, spacing: 8) {
+                statusBadge
+                Spacer(minLength: 8)
+                metricModePicker
+            }
+            .frame(maxHeight: .infinity, alignment: .bottomTrailing)
         }
         .padding(14)
         .background(sectionBackground)
     }
 
+    private var metricModePicker: some View {
+        Picker("Metric", selection: $metricMode) {
+            ForEach(PanelMetricMode.allCases) { mode in
+                Text(mode.label)
+                    .tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .controlSize(.small)
+        .tint(Color.blue.opacity(0.3))
+        .frame(width: 196)
+        .labelsHidden()
+    }
+
     private var summaryCards: some View {
         HStack(spacing: 8) {
-            MetricCard(title: "Today", value: "\(appState.todayPresses)", detail: "press")
-            MetricCard(title: "Held", value: formatDuration(appState.todayHeldMs), detail: "today")
-            MetricCard(title: "7D Press", value: "\(appState.last7DaysPresses)", detail: "press")
-            MetricCard(title: "7D Held", value: formatDuration(appState.last7DaysHeldMs), detail: "range")
+            switch metricMode {
+            case .combined:
+                MetricCard(title: "Today", value: "\(appState.todayPresses)", detail: "press")
+                MetricCard(title: "Held", value: formatDuration(appState.todayHeldMs), detail: "today")
+                MetricCard(title: "7D Press", value: "\(appState.last7DaysPresses)", detail: "press")
+                MetricCard(title: "7D Held", value: formatDuration(appState.last7DaysHeldMs), detail: "range")
+            case .press:
+                MetricCard(title: "Today", value: "\(appState.todayPresses)", detail: "press")
+                MetricCard(title: "7D Press", value: "\(appState.last7DaysPresses)", detail: "range")
+            case .held:
+                MetricCard(title: "Held", value: formatDuration(appState.todayHeldMs), detail: "today")
+                MetricCard(title: "7D Held", value: formatDuration(appState.last7DaysHeldMs), detail: "range")
+            }
         }
     }
 
@@ -67,9 +96,10 @@ struct MenuView: View {
                 ForEach(appState.dailySummaries, id: \.dayStart) { summary in
                     DailyTrendBar(
                         label: dayLabel(for: summary.dayStart),
-                        value: summary.pressCount,
-                        maxValue: maxDailyPressCount,
-                        heldMs: summary.heldMs
+                        valueText: trendValueText(for: summary),
+                        value: trendValue(for: summary),
+                        maxValue: maxDailyValue,
+                        detailText: trendDetailText(for: summary)
                     )
                     .frame(maxWidth: .infinity)
                 }
@@ -109,7 +139,7 @@ struct MenuView: View {
                         Text("r\(summary.row)c\(summary.col)")
                             .font(.caption.monospacedDigit())
                         Spacer()
-                        Text("\(summary.pressCount)")
+                        Text(topKeyValueText(for: summary))
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -194,16 +224,30 @@ struct MenuView: View {
     }
 
     private var topKeys: [KeySummary] {
-        appState.keySummaries
-            .filter { $0.pressCount > 0 }
-            .sorted {
-                if $0.pressCount == $1.pressCount {
+        switch metricMode {
+        case .combined, .press:
+            return appState.keySummaries
+                .filter { $0.pressCount > 0 }
+                .sorted {
+                    if $0.pressCount == $1.pressCount {
+                        return $0.heldMs > $1.heldMs
+                    }
+                    return $0.pressCount > $1.pressCount
+                }
+                .prefix(3)
+                .map { $0 }
+        case .held:
+            return appState.keySummaries
+                .filter { $0.heldMs > 0 }
+                .sorted {
+                    if $0.heldMs == $1.heldMs {
+                        return $0.pressCount > $1.pressCount
+                    }
                     return $0.heldMs > $1.heldMs
                 }
-                return $0.pressCount > $1.pressCount
-            }
-            .prefix(3)
-            .map { $0 }
+                .prefix(3)
+                .map { $0 }
+        }
     }
 
     private var leftPresses: Int {
@@ -226,8 +270,17 @@ struct MenuView: View {
         max(leftPresses + rightPresses, 1)
     }
 
-    private var maxDailyPressCount: Int {
-        max(appState.dailySummaries.map(\.pressCount).max() ?? 0, 1)
+    private var totalHeldMs: Int64 {
+        max(leftHeldMs + rightHeldMs, 1)
+    }
+
+    private var maxDailyValue: Double {
+        switch metricMode {
+        case .combined, .press:
+            return Double(max(appState.dailySummaries.map(\.pressCount).max() ?? 0, 1))
+        case .held:
+            return Double(max(appState.dailySummaries.map(\.heldMs).max() ?? 0, 1))
+        }
     }
 
     private var equalizedInsightCardHeight: CGFloat? {
@@ -262,17 +315,58 @@ struct MenuView: View {
         return Double(value) / Double(total)
     }
 
+    private func loadFraction(_ value: Int64, total: Int64) -> Double {
+        guard total > 0 else { return 0 }
+        return Double(value) / Double(total)
+    }
+
+    private func trendValue(for summary: DailySummary) -> Double {
+        switch metricMode {
+        case .combined, .press:
+            return Double(summary.pressCount)
+        case .held:
+            return Double(summary.heldMs)
+        }
+    }
+
+    private func trendValueText(for summary: DailySummary) -> String {
+        switch metricMode {
+        case .combined, .press:
+            return "\(summary.pressCount)"
+        case .held:
+            return trendDuration(summary.heldMs)
+        }
+    }
+
+    private func trendDetailText(for summary: DailySummary) -> String? {
+        switch metricMode {
+        case .combined:
+            return trendDuration(summary.heldMs)
+        case .press, .held:
+            return nil
+        }
+    }
+
+    private func topKeyValueText(for summary: KeySummary) -> String {
+        switch metricMode {
+        case .combined, .press:
+            return "\(summary.pressCount)"
+        case .held:
+            return shortDuration(summary.heldMs)
+        }
+    }
+
     private var handLoadCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle("Hand Load")
             UnifiedLoadBar(
                 leftLabel: "Left",
-                leftPresses: leftPresses,
-                leftHeldText: shortDuration(leftHeldMs),
-                leftFraction: loadFraction(leftPresses, total: totalPresses),
+                leftValueText: loadValueText(presses: leftPresses, heldMs: leftHeldMs),
+                leftDetailText: loadDetailText(heldMs: leftHeldMs),
+                leftFraction: loadFraction,
                 rightLabel: "Right",
-                rightPresses: rightPresses,
-                rightHeldText: shortDuration(rightHeldMs)
+                rightValueText: loadValueText(presses: rightPresses, heldMs: rightHeldMs),
+                rightDetailText: loadDetailText(heldMs: rightHeldMs)
             )
         }
         .padding(14)
@@ -284,6 +378,33 @@ struct MenuView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(height: equalizedInsightCardHeight, alignment: .topLeading)
         .background(sectionBackground)
+    }
+
+    private var loadFraction: Double {
+        switch metricMode {
+        case .combined, .press:
+            return loadFraction(leftPresses, total: totalPresses)
+        case .held:
+            return loadFraction(leftHeldMs, total: totalHeldMs)
+        }
+    }
+
+    private func loadValueText(presses: Int, heldMs: Int64) -> String {
+        switch metricMode {
+        case .combined, .press:
+            return "\(presses) presses"
+        case .held:
+            return shortDuration(heldMs)
+        }
+    }
+
+    private func loadDetailText(heldMs: Int64) -> String? {
+        switch metricMode {
+        case .combined:
+            return shortDuration(heldMs)
+        case .press, .held:
+            return nil
+        }
     }
 
     private func sectionTitle(_ text: String) -> some View {
@@ -317,6 +438,14 @@ struct MenuView: View {
         if seconds < 10 {
             return String(format: "%.1fs", seconds)
         }
+        if seconds < 60 {
+            return String(format: "%.0fs", seconds)
+        }
+        return String(format: "%.1fm", seconds / 60)
+    }
+
+    private func trendDuration(_ milliseconds: Int64) -> String {
+        let seconds = Double(milliseconds) / 1000
         if seconds < 60 {
             return String(format: "%.0fs", seconds)
         }
@@ -369,12 +498,12 @@ private struct HeightReader: View {
 
 private struct UnifiedLoadBar: View {
     let leftLabel: String
-    let leftPresses: Int
-    let leftHeldText: String
+    let leftValueText: String
+    let leftDetailText: String?
     let leftFraction: Double
     let rightLabel: String
-    let rightPresses: Int
-    let rightHeldText: String
+    let rightValueText: String
+    let rightDetailText: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -402,23 +531,27 @@ private struct UnifiedLoadBar: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(leftLabel)
                         .font(.caption.weight(.semibold))
-                    Text("\(leftPresses) presses")
+                    Text(leftValueText)
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
-                    Text(leftHeldText)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                    if let leftDetailText {
+                        Text(leftDetailText)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 3) {
                     Text(rightLabel)
                         .font(.caption.weight(.semibold))
-                    Text("\(rightPresses) presses")
+                    Text(rightValueText)
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
-                    Text(rightHeldText)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                    if let rightDetailText {
+                        Text(rightDetailText)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -427,13 +560,14 @@ private struct UnifiedLoadBar: View {
 
 private struct DailyTrendBar: View {
     let label: String
-    let value: Int
-    let maxValue: Int
-    let heldMs: Int64
+    let valueText: String
+    let value: Double
+    let maxValue: Double
+    let detailText: String?
 
     var body: some View {
         VStack(spacing: 6) {
-            Text("\(value)")
+            Text(valueText)
                 .font(.system(size: 10, weight: .semibold, design: .rounded))
                 .monospacedDigit()
             RoundedRectangle(cornerRadius: 5)
@@ -445,30 +579,24 @@ private struct DailyTrendBar: View {
                     .font(.system(size: 9, weight: .medium, design: .rounded))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                Spacer(minLength: 2)
-                Text(heldText)
-                    .font(.system(size: 8, weight: .regular, design: .rounded))
-                    .foregroundStyle(.tertiary)
-                    .monospacedDigit()
+                if let detailText {
+                    Spacer(minLength: 2)
+                    Text(detailText)
+                        .font(.system(size: 8, weight: .regular, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .bottom)
     }
 
     private var barHeight: CGFloat {
-        let ratio = Double(value) / Double(maxValue)
+        let ratio = maxValue > 0 ? value / maxValue : 0
         return max(12, 12 + ratio * 42)
     }
 
     private var barColor: Color {
-        value == 0 ? Color.secondary.opacity(0.15) : Color.accentColor.opacity(0.22 + min(Double(value) / Double(maxValue), 1) * 0.5)
-    }
-
-    private var heldText: String {
-        let seconds = Double(heldMs) / 1000
-        if seconds < 60 {
-            return String(format: "%.0fs", seconds)
-        }
-        return String(format: "%.1fm", seconds / 60)
+        value == 0 ? Color.secondary.opacity(0.15) : Color.accentColor.opacity(0.22 + min(value / maxValue, 1) * 0.5)
     }
 }
